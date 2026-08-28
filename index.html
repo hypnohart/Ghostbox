@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Ghost Box Pro</title>
+    <title>Ghost Box Pro Stable</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background-color: #09090b; font-family: monospace; color: #a1a1aa; touch-action: manipulation; }
@@ -11,13 +11,14 @@
         .btn-active { background-color: #f97316 !important; color: white !important; }
         .rec-active { background-color: #ef4444 !important; animation: pulse 1s infinite; }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        input[type=range] { -webkit-appearance: none; background: #27272a; height: 8px; border-radius: 5px; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 20px; width: 20px; border-radius: 50%; background: #f97316; cursor: pointer; }
     </style>
 </head>
 <body class="p-4">
     <div class="max-w-md mx-auto space-y-4">
-        <h1 class="text-xl font-bold text-orange-500 text-center tracking-tighter">GHOST BOX PRO</h1>
+        <h1 class="text-xl font-bold text-orange-500 text-center tracking-tighter">GHOST BOX PRO <span class="text-[10px] opacity-50">v2.1</span></h1>
 
-        <!-- Tuning Meter -->
         <div class="bg-zinc-900 p-3 rounded-xl border border-zinc-800">
             <div class="flex justify-between text-[9px] mb-1">
                 <span>TUNING VOLTAGE</span>
@@ -28,89 +29,123 @@
             </div>
         </div>
 
-        <!-- LCD Status -->
         <div id="status" class="lcd p-3 rounded-lg h-32 text-[10px] overflow-hidden leading-tight">
             > SYSTEM READY...
         </div>
 
-        <!-- Speed & Echo Controls -->
         <div class="grid grid-cols-2 gap-3">
             <div class="bg-zinc-900 p-2 rounded border border-zinc-800">
                 <label class="text-[9px] block opacity-50">SCAN SPEED</label>
-                <input type="range" id="dwell" min="50" max="1500" value="400" class="w-full accent-orange-500">
+                <input type="range" id="dwell" min="60" max="1500" value="400" class="w-full">
                 <div id="speed-label" class="text-[10px] text-center text-orange-400 mt-1">400ms</div>
             </div>
             <div class="bg-zinc-900 p-2 rounded border border-zinc-800">
                 <label class="text-[9px] block opacity-50">ECHO DEPTH</label>
-                <input type="range" id="echo" min="0" max="85" value="30" class="w-full accent-orange-500">
+                <input type="range" id="echo" min="0" max="90" value="30" class="w-full">
                 <div id="echo-label" class="text-[10px] text-center text-orange-400 mt-1">30%</div>
             </div>
         </div>
 
-        <!-- Main Buttons -->
         <div class="grid grid-cols-2 gap-3">
-            <button id="power-btn" class="py-6 bg-zinc-800 text-white font-bold rounded-xl border-b-4 border-black active:border-b-0 active:translate-y-1">
-                START SCAN
-            </button>
-            <button id="rec-btn" class="py-6 bg-zinc-800 text-zinc-400 font-bold rounded-xl border-b-4 border-black active:border-b-0 active:translate-y-1">
-                RECORD OFF
-            </button>
+            <button id="power-btn" class="py-6 bg-zinc-800 text-white font-bold rounded-xl border-b-4 border-black active:border-b-0 active:translate-y-1">START SCAN</button>
+            <button id="rec-btn" class="py-6 bg-zinc-800 text-zinc-400 font-bold rounded-xl border-b-4 border-black active:border-b-0 active:translate-y-1">RECORD OFF</button>
         </div>
     </div>
 
     <script>
         let audioCtx, masterGain, echoNode, echoFeedback, recorder, chunks = [], isRunning = false, isRecording = false, stations = [], currentIndex = 0;
+        let currentAudio = null;
 
-        function log(msg) {
+        const log = (msg) => {
             const div = document.createElement('div');
             div.innerHTML = `> ${msg}`;
             const status = document.getElementById('status');
             status.prepend(div);
-        }
+            if (status.childNodes.length > 50) status.removeChild(status.lastChild);
+        };
 
-        async function startSweep() {
+        // SAVE & LOAD SETTINGS
+        const saveSettings = () => {
+            const settings = {
+                dwell: document.getElementById('dwell').value,
+                echo: document.getElementById('echo').value
+            };
+            localStorage.setItem('ghostBoxSettings', JSON.stringify(settings));
+        };
+
+        const loadSettings = () => {
+            const saved = localStorage.getItem('ghostBoxSettings');
+            if (saved) {
+                const s = JSON.parse(saved);
+                document.getElementById('dwell').value = s.dwell;
+                document.getElementById('echo').value = s.echo;
+                updateLabels();
+            }
+        };
+
+        const updateLabels = () => {
+            const d = document.getElementById('dwell').value;
+            const e = document.getElementById('echo').value;
+            document.getElementById('speed-label').innerText = `${d}ms (${(1000/d).toFixed(1)}/s)`;
+            document.getElementById('echo-label').innerText = `${e}%`;
+            if (echoFeedback) echoFeedback.gain.value = e / 100;
+        };
+
+        const cleanupAudio = () => {
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio.src = "";
+                currentAudio.load();
+                currentAudio = null;
+            }
+        };
+
+        async function sweep() {
             if (!isRunning || stations.length === 0) return;
-            const s = stations[currentIndex];
             
-            // Speed Calculation
-            const dwellTime = document.getElementById('dwell').value;
+            cleanupAudio(); // Force kill previous audio
+            
+            const s = stations[currentIndex];
+            const dwellTime = parseInt(document.getElementById('dwell').value);
+            
+            // VT Display Logic
             const v = (Math.random() * 8.2).toFixed(1);
             document.getElementById('vt-display').innerText = v + "V";
             document.getElementById('vt-bar').style.width = (v / 8.2 * 100) + "%";
-            log(`TUNING: ${s.name.substring(0,10)} (${dwellTime}ms)`);
+            log(`TUNING: ${s.name.substring(0,12)}`);
 
-            const audio = new Audio(s.url);
-            audio.crossOrigin = "anonymous";
+            currentAudio = new Audio();
+            currentAudio.src = s.url;
+            currentAudio.crossOrigin = "anonymous";
             
             try {
-                const source = audioCtx.createMediaElementSource(audio);
+                const source = audioCtx.createMediaElementSource(currentAudio);
                 source.connect(masterGain);
-                await audio.play();
+                await currentAudio.play();
+                
                 setTimeout(() => {
-                    audio.pause(); audio.src = ""; audio.load();
                     currentIndex = (currentIndex + 1) % stations.length;
-                    startSweep();
+                    sweep();
                 }, dwellTime);
-            } catch (e) {
+            } catch (err) {
+                // If stream fails, jump immediately
                 currentIndex = (currentIndex + 1) % stations.length;
-                startSweep();
+                sweep();
             }
         }
 
-        // INITIALIZE AUDIO & RECORDING
-        async function init() {
+        async function initEngine() {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             masterGain = audioCtx.createGain();
             echoNode = audioCtx.createDelay();
-            echoNode.delayTime.value = 0.2;
+            echoNode.delayTime.value = 0.25;
             echoFeedback = audioCtx.createGain();
-            echoFeedback.gain.value = 0.3;
+            echoFeedback.gain.value = document.getElementById('echo').value / 100;
 
             masterGain.connect(echoNode);
             echoNode.connect(echoFeedback);
             echoFeedback.connect(echoNode);
             
-            // Create a Destination for the Recorder
             const dest = audioCtx.createMediaStreamDestination();
             echoNode.connect(dest);
             echoNode.connect(audioCtx.destination);
@@ -122,37 +157,38 @@
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `ghostbox_session_${Date.now()}.ogg`;
+                a.download = `GB_Session_${Date.now()}.ogg`;
                 a.click();
                 chunks = [];
-                log("RECORDING SAVED TO DOWNLOADS");
+                log("RECORDING SAVED");
             };
         }
 
         document.getElementById('power-btn').onclick = async () => {
             if (!isRunning) {
-                if (!audioCtx) await init();
+                if (!audioCtx) await initEngine();
                 audioCtx.resume();
                 isRunning = true;
                 document.getElementById('power-btn').innerText = "STOP SCAN";
                 document.getElementById('power-btn').classList.add('btn-active');
-                log("CONNECTING TO RADIO BAND...");
-                const res = await fetch('https://de1.api.radio-browser.info/json/stations/bytag/talk?limit=60&https=true');
-                stations = await res.json();
-                startSweep();
+                log("FETCHING STATIONS...");
+                try {
+                    const res = await fetch('https://de1.api.radio-browser.info/json/stations/bytag/talk?limit=80&https=true');
+                    stations = await res.json();
+                    sweep();
+                } catch(e) { log("CONNECTION ERROR"); isRunning = false; }
             } else {
                 location.reload();
             }
         };
 
         document.getElementById('rec-btn').onclick = () => {
-            if (!isRunning) { log("START SCAN BEFORE RECORDING"); return; }
+            if (!isRunning) { log("START SCAN FIRST"); return; }
             if (!isRecording) {
                 recorder.start();
                 isRecording = true;
                 document.getElementById('rec-btn').innerText = "RECORDING ON";
                 document.getElementById('rec-btn').classList.add('rec-active');
-                log("RECORDING STARTED...");
             } else {
                 recorder.stop();
                 isRecording = false;
@@ -161,16 +197,12 @@
             }
         };
 
-        // UI Updates
-        document.getElementById('dwell').oninput = (e) => {
-            const speed = e.target.value;
-            const rate = (1000 / speed).toFixed(1);
-            document.getElementById('speed-label').innerText = `${speed}ms (${rate} stn/sec)`;
-        };
-        document.getElementById('echo').oninput = (e) => {
-            if(echoFeedback) echoFeedback.gain.value = e.target.value / 100;
-            document.getElementById('echo-label').innerText = e.target.value + "%";
-        };
+        // EVENT LISTENERS
+        document.getElementById('dwell').oninput = () => { updateLabels(); saveSettings(); };
+        document.getElementById('echo').oninput = () => { updateLabels(); saveSettings(); };
+
+        // INITIAL LOAD
+        window.onload = loadSettings;
     </script>
 </body>
 </html>
