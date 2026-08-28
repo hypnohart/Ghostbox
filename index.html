@@ -1,40 +1,169 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Digital Ghost Box Mobile</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<style>
-body { background-color: #09090b; font-family: monospace; color: #a1a1aa; touch-action: manipulation; }
-.amber-glow { text-shadow: 0 0 10px #f97316; }
-.lcd-screen { background: #020617; border: 2px inset #1e293b; color: #4ade80; text-shadow: 0 0 5px #4ade80; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Digital Ghost Box Mobile</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #09090b; font-family: monospace; color: #a1a1aa; touch-action: manipulation; }
+        .amber-glow { text-shadow: 0 0 10px #f97316; }
+        .lcd-screen { background: #020617; border: 2px inset #1e293b; color: #4ade80; text-shadow: 0 0 5px #4ade80; overflow-y: auto; }
+    </style>
 </head>
 <body class="p-4">
-<div class="max-w-md mx-auto space-y-6">
+    <div class="max-w-md mx-auto space-y-6">
+        <div class="text-center">
+            <h1 class="text-2xl font-bold text-orange-500 amber-glow">GHOST BOX MOBILE</h1>
+            <p class="text-[10px] uppercase tracking-widest opacity-50">ITC Sweep Instrument</p>
+        </div>
 
-<!-- Header -->
-<div class="text-center">
-<h1 class="text-2xl font-bold text-orange-500 amber-glow">GHOST BOX MOBILE</h1>
-<p class="text-[10px] uppercase tracking-widest opacity-50">ITC Sweep Instrument</p>
-</div>
+        <div class="bg-zinc-900 p-4 rounded-xl border border-zinc-800">
+            <div class="flex justify-between text-[10px] mb-1">
+                <span>TUNING VOLTAGE</span>
+                <span id="vt-display" class="text-orange-500 font-bold">0.0V</span>
+            </div>
+            <div class="w-full bg-black h-4 rounded-full overflow-hidden border border-zinc-700">
+                <div id="vt-bar" class="bg-orange-500 h-full transition-all duration-100" style="width: 0%"></div>
+            </div>
+        </div>
 
-<!-- VT Meter -->
-<div class="bg-zinc-900 p-4 rounded-xl border border-zinc-800 shadow-2xl">
-<div class="flex justify-between text-[10px] mb-1">
-<span>TUNING VOLTAGE</span>
-<span id="vt-display" class="text-orange-500 font-bold">0.0V</span>
-</div>
-<div class="w-full bg-black h-4 rounded-full overflow-hidden border border-zinc-700">
-<div id="vt-bar" class="bg-orange-500 h-full transition-all duration-100" style="width: 0%"></div>
-</div>
-</div>
+        <!-- LCD Screen with Debug Info -->
+        <div id="terminal-out" class="lcd-screen p-4 rounded-lg h-40 text-[10px] leading-tight">
+            > SYSTEM READY...<br>> TAP START TO INITIALIZE
+        </div>
 
-<!-- LCD Metadata Screen -->
-<div class="lcd-screen p-4 rounded-lg h-32 text-xs overflow-hidden leading-tight">
-<div id="terminal-out">> STANDBY...<br>> TAP START TO INITIALIZE</div>
-</div>
+        <div class="grid grid-cols-2 gap-4">
+            <div class="bg-zinc-900 p-3 rounded border border-zinc-800">
+                <label class="text-[9px] block opacity-50 uppercase">Dwell (Speed)</label>
+                <input type="range" id="dwell-range" min="200" max="2000" value="800" class="w-full accent-orange-500">
+                <div id="dwell-val" class="text-center text-xs">800ms</div>
+            </div>
+            <div class="bg-zinc-900 p-3 rounded border border-zinc-800">
+                <label class="text-[9px] block opacity-50 uppercase">Echo Box</label>
+                <input type="range" id="echo-range" min="0" max="80" value="30" class="w-full accent-orange-500">
+                <div id="echo-val" class="text-center text-xs">30%</div>
+            </div>
+        </div>
+
+        <button id="power-btn" class="w-full py-6 bg-zinc-800 text-white font-bold rounded-2xl border-b-8 border-black active:border-b-0 active:translate-y-1 transition-all text-xl shadow-2xl">
+            START ENGINE
+        </button>
+    </div>
+
+    <script>
+        let audioCtx, masterGain, echoNode, echoFeedback;
+        let isRunning = false;
+        let stations = [];
+        let currentIndex = 0;
+
+        const terminal = document.getElementById('terminal-out');
+        const powerBtn = document.getElementById('power-btn');
+        const vtBar = document.getElementById('vt-bar');
+        const vtDisplay = document.getElementById('vt-display');
+
+        function log(msg) {
+            const entry = document.createElement('div');
+            entry.innerHTML = `> ${msg}`;
+            terminal.prepend(entry);
+        }
+
+        async function loadStations() {
+            log("SEARCHING FOR SECURE STATIONS...");
+            try {
+                // This searches for talk stations that use HTTPS (Secure)
+                const res = await fetch('https://de1.api.radio-browser.info/json/stations/bytag/talk?limit=60&https=true');
+                stations = await res.json();
+                if(stations.length > 0) {
+                    log(`CONNECTED: ${stations.length} SOURCES FOUND`);
+                } else {
+                    log("NO STATIONS FOUND. TRYING AGAIN...");
+                }
+            } catch (e) {
+                log("NETWORK ERROR. CHECK WIFI.");
+            }
+        }
+
+        function initAudio() {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            masterGain = audioCtx.createGain();
+            
+            // Reverb/Echo Simulation
+            echoNode = audioCtx.createDelay();
+            echoNode.delayTime.value = 0.2;
+            echoFeedback = audioCtx.createGain();
+            echoFeedback.gain.value = 0.3;
+
+            masterGain.connect(echoNode);
+            echoNode.connect(echoFeedback);
+            echoFeedback.connect(echoNode);
+            echoNode.connect(audioCtx.destination);
+            log("AUDIO ENGINE INITIALIZED");
+        }
+
+        async function sweep() {
+            if (!isRunning || stations.length === 0) return;
+
+            const station = stations[currentIndex];
+            const dwell = document.getElementById('dwell-range').value;
+            
+            // Random Tuning Voltage Display
+            const v = (Math.random() * 8.2).toFixed(1);
+            vtDisplay.innerText = v + "V";
+            vtBar.style.width = (v / 8.2 * 100) + "%";
+
+            log(`SWEEPING: ${station.name.substring(0, 12)}`);
+
+            const audio = new Audio();
+            audio.src = station.url;
+            audio.crossOrigin = "anonymous";
+            
+            try {
+                const source = audioCtx.createMediaElementSource(audio);
+                source.connect(masterGain);
+                await audio.play();
+                
+                setTimeout(() => {
+                    audio.pause();
+                    audio.src = "";
+                    currentIndex = (currentIndex + 1) % stations.length;
+                    sweep();
+                }, dwell);
+            } catch (err) {
+                // If a station fails, skip it immediately
+                currentIndex = (currentIndex + 1) % stations.length;
+                sweep();
+            }
+        }
+
+        powerBtn.addEventListener('click', async () => {
+            if (!isRunning) {
+                // Initialization
+                if (!audioCtx) initAudio();
+                if (audioCtx.state === 'suspended') await audioCtx.resume();
+                
+                isRunning = true;
+                powerBtn.innerText = "STOPPING...";
+                powerBtn.style.color = "#f97316";
+                
+                await loadStations();
+                powerBtn.innerText = "STOP ENGINE";
+                sweep();
+            } else {
+                // Stop everything
+                location.reload();
+            }
+        });
+
+        // Sliders
+        document.getElementById('dwell-range').oninput = (e) => document.getElementById('dwell-val').innerText = e.target.value + "ms";
+        document.getElementById('echo-range').oninput = (e) => {
+            if(echoFeedback) echoFeedback.gain.value = e.target.value / 100;
+            document.getElementById('echo-val').innerText = e.target.value + "%";
+        };
+    </script>
+</body>
+</html></div>
 
 <!-- Controls -->
 <div class="grid grid-cols-2 gap-4">
