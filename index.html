@@ -3,63 +3,53 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Ghost Box Pro</title>
+    <title>Ghost Box</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { background-color: #09090b; font-family: monospace; color: #a1a1aa; touch-action: manipulation; }
         .lcd { background: #020617; border: 2px inset #1e293b; color: #4ade80; text-shadow: 0 0 5px #4ade80; }
-        .btn-active { background-color: #f97316 !important; color: white !important; }
-        .rec-active { background-color: #ef4444 !important; animation: pulse 1s infinite; }
-        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
 </head>
 <body class="p-4">
-    <div class="max-w-md mx-auto space-y-4">
-        <h1 class="text-xl font-bold text-orange-500 text-center tracking-tighter">GHOST BOX PRO</h1>
+    <div class="max-w-md mx-auto space-y-6">
+        <h1 class="text-2xl font-bold text-orange-500 text-center">GHOST BOX</h1>
 
         <!-- Tuning Meter -->
-        <div class="bg-zinc-900 p-3 rounded-xl border border-zinc-800">
-            <div class="flex justify-between text-[9px] mb-1">
+        <div class="bg-zinc-900 p-4 rounded-xl border border-zinc-800">
+            <div class="flex justify-between text-[10px] mb-1">
                 <span>TUNING VOLTAGE</span>
                 <span id="vt-display" class="text-orange-500 font-bold">0.0V</span>
             </div>
-            <div class="w-full bg-black h-3 rounded-full border border-zinc-700">
+            <div class="w-full bg-black h-4 rounded-full border border-zinc-700">
                 <div id="vt-bar" class="bg-orange-500 h-full transition-all" style="width: 0%"></div>
             </div>
         </div>
 
-        <!-- LCD Status -->
-        <div id="status" class="lcd p-3 rounded-lg h-32 text-[10px] overflow-hidden leading-tight">
-            > SYSTEM READY...
+        <!-- LCD Screen -->
+        <div id="status" class="lcd p-4 rounded-lg h-32 text-[10px] overflow-hidden">
+            > SYSTEM READY...<br>> TAP START
         </div>
 
-        <!-- Speed & Echo Controls -->
-        <div class="grid grid-cols-2 gap-3">
+        <!-- Controls -->
+        <div class="grid grid-cols-2 gap-4 text-center">
             <div class="bg-zinc-900 p-2 rounded border border-zinc-800">
-                <label class="text-[9px] block opacity-50">SCAN SPEED</label>
-                <input type="range" id="dwell" min="50" max="1500" value="400" class="w-full accent-orange-500">
-                <div id="speed-label" class="text-[10px] text-center text-orange-400 mt-1">400ms</div>
+                <label class="text-[9px] block opacity-50">SPEED</label>
+                <input type="range" id="dwell" min="200" max="2000" value="800" class="w-full accent-orange-500">
             </div>
             <div class="bg-zinc-900 p-2 rounded border border-zinc-800">
-                <label class="text-[9px] block opacity-50">ECHO DEPTH</label>
-                <input type="range" id="echo" min="0" max="85" value="30" class="w-full accent-orange-500">
-                <div id="echo-label" class="text-[10px] text-center text-orange-400 mt-1">30%</div>
+                <label class="text-[9px] block opacity-50">ECHO</label>
+                <input type="range" id="echo" min="0" max="80" value="30" class="w-full accent-orange-500">
             </div>
         </div>
 
-        <!-- Main Buttons -->
-        <div class="grid grid-cols-2 gap-3">
-            <button id="power-btn" class="py-6 bg-zinc-800 text-white font-bold rounded-xl border-b-4 border-black active:border-b-0 active:translate-y-1">
-                START SCAN
-            </button>
-            <button id="rec-btn" class="py-6 bg-zinc-800 text-zinc-400 font-bold rounded-xl border-b-4 border-black active:border-b-0 active:translate-y-1">
-                RECORD OFF
-            </button>
-        </div>
+        <!-- THE ONLY START BUTTON -->
+        <button id="power-btn" class="w-full py-8 bg-zinc-800 text-white font-bold rounded-2xl border-b-8 border-black active:border-b-0 active:translate-y-1 text-xl">
+            START ENGINE
+        </button>
     </div>
 
     <script>
-        let audioCtx, masterGain, echoNode, echoFeedback, recorder, chunks = [], isRunning = false, isRecording = false, stations = [], currentIndex = 0;
+        let audioCtx, masterGain, echoNode, echoFeedback, isRunning = false, stations = [], currentIndex = 0;
 
         function log(msg) {
             const div = document.createElement('div');
@@ -72,12 +62,11 @@
             if (!isRunning || stations.length === 0) return;
             const s = stations[currentIndex];
             
-            // Speed Calculation
-            const dwellTime = document.getElementById('dwell').value;
+            // UI Update
             const v = (Math.random() * 8.2).toFixed(1);
             document.getElementById('vt-display').innerText = v + "V";
             document.getElementById('vt-bar').style.width = (v / 8.2 * 100) + "%";
-            log(`TUNING: ${s.name.substring(0,10)} (${dwellTime}ms)`);
+            log(`TUNING: ${s.name.substring(0,10)}`);
 
             const audio = new Audio(s.url);
             audio.crossOrigin = "anonymous";
@@ -87,57 +76,36 @@
                 source.connect(masterGain);
                 await audio.play();
                 setTimeout(() => {
-                    audio.pause(); audio.src = ""; audio.load();
+                    audio.pause();
+                    audio.src = "";
                     currentIndex = (currentIndex + 1) % stations.length;
                     startSweep();
-                }, dwellTime);
+                }, document.getElementById('dwell').value);
             } catch (e) {
                 currentIndex = (currentIndex + 1) % stations.length;
                 startSweep();
             }
         }
 
-        // INITIALIZE AUDIO & RECORDING
-        async function init() {
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            masterGain = audioCtx.createGain();
-            echoNode = audioCtx.createDelay();
-            echoNode.delayTime.value = 0.2;
-            echoFeedback = audioCtx.createGain();
-            echoFeedback.gain.value = 0.3;
-
-            masterGain.connect(echoNode);
-            echoNode.connect(echoFeedback);
-            echoFeedback.connect(echoNode);
-            
-            // Create a Destination for the Recorder
-            const dest = audioCtx.createMediaStreamDestination();
-            echoNode.connect(dest);
-            echoNode.connect(audioCtx.destination);
-
-            recorder = new MediaRecorder(dest.stream);
-            recorder.ondataavailable = e => chunks.push(e.data);
-            recorder.onstop = () => {
-                const blob = new Blob(chunks, { type: 'audio/ogg; codecs=opus' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `ghostbox_session_${Date.now()}.ogg`;
-                a.click();
-                chunks = [];
-                log("RECORDING SAVED TO DOWNLOADS");
-            };
-        }
-
         document.getElementById('power-btn').onclick = async () => {
             if (!isRunning) {
-                if (!audioCtx) await init();
+                if (!audioCtx) {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    masterGain = audioCtx.createGain();
+                    echoNode = audioCtx.createDelay();
+                    echoNode.delayTime.value = 0.2;
+                    echoFeedback = audioCtx.createGain();
+                    echoFeedback.gain.value = 0.3;
+                    masterGain.connect(echoNode);
+                    echoNode.connect(echoFeedback);
+                    echoFeedback.connect(echoNode);
+                    echoNode.connect(audioCtx.destination);
+                }
                 audioCtx.resume();
                 isRunning = true;
-                document.getElementById('power-btn').innerText = "STOP SCAN";
-                document.getElementById('power-btn').classList.add('btn-active');
-                log("CONNECTING TO RADIO BAND...");
-                const res = await fetch('https://de1.api.radio-browser.info/json/stations/bytag/talk?limit=60&https=true');
+                document.getElementById('power-btn').innerText = "STOP ENGINE";
+                log("FETCHING STATIONS...");
+                const res = await fetch('https://de1.api.radio-browser.info/json/stations/bytag/talk?limit=40&https=true');
                 stations = await res.json();
                 startSweep();
             } else {
@@ -145,31 +113,8 @@
             }
         };
 
-        document.getElementById('rec-btn').onclick = () => {
-            if (!isRunning) { log("START SCAN BEFORE RECORDING"); return; }
-            if (!isRecording) {
-                recorder.start();
-                isRecording = true;
-                document.getElementById('rec-btn').innerText = "RECORDING ON";
-                document.getElementById('rec-btn').classList.add('rec-active');
-                log("RECORDING STARTED...");
-            } else {
-                recorder.stop();
-                isRecording = false;
-                document.getElementById('rec-btn').innerText = "RECORD OFF";
-                document.getElementById('rec-btn').classList.remove('rec-active');
-            }
-        };
-
-        // UI Updates
-        document.getElementById('dwell').oninput = (e) => {
-            const speed = e.target.value;
-            const rate = (1000 / speed).toFixed(1);
-            document.getElementById('speed-label').innerText = `${speed}ms (${rate} stn/sec)`;
-        };
         document.getElementById('echo').oninput = (e) => {
             if(echoFeedback) echoFeedback.gain.value = e.target.value / 100;
-            document.getElementById('echo-label').innerText = e.target.value + "%";
         };
     </script>
 </body>
